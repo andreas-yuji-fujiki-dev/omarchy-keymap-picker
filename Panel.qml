@@ -11,8 +11,8 @@ import "Model.js" as Model
 // BarWidget.qml owns the data and the apply step; this panel only draws it.
 Panel {
   id: root
-  moduleName: "andreas.keymap"
-  ipcTarget: "andreas.keymap"
+  moduleName: "io.github.andreas.keymap"
+  ipcTarget: "io.github.andreas.keymap"
   manageIpc: false
 
   property var anchorItem: null
@@ -22,6 +22,8 @@ Panel {
   readonly property var layouts: hostWidget ? hostWidget.layouts : []
   readonly property string currentLayout: hostWidget ? hostWidget.currentLayout : ""
   readonly property string currentVariant: hostWidget ? hostWidget.currentVariant : ""
+  readonly property bool asking: hostWidget ? hostWidget.askingToSave : false
+  readonly property var saveChoice: hostWidget ? hostWidget.saveChoice : null
 
   // What the left list shows, and which entry of it is highlighted. Browsing
   // never changes the layout; only picking a variant does.
@@ -80,7 +82,7 @@ Panel {
 
   function applyRow(index) {
     if (!browsedLayout || !hostWidget || index < 0 || index >= rows.length) return
-    hostWidget.applyLayout(browsedLayout.name, rows[index].value)
+    hostWidget.requestApply(browsedLayout.name, rows[index].value)
   }
 
   // A layout with no variants has nothing to choose on the right, so picking
@@ -170,6 +172,13 @@ Panel {
         onTextChanged: root.query = text
 
         Keys.onPressed: function(event) {
+          if (root.asking) {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.hostWidget.confirmSave(true)
+            else if (event.key === Qt.Key_Escape) root.hostWidget.cancelSave()
+            else if (event.key === Qt.Key_S) root.hostWidget.confirmSave(false)
+            event.accepted = true
+            return
+          }
           var onVariants = root.focusPane === "variants"
           if (event.key === Qt.Key_Escape) {
             root.close()
@@ -191,22 +200,49 @@ Panel {
         }
       }
 
-      // ---- Footer: result of the last apply, or the key hints.
-      Text {
+      // ---- Footer: result of the last apply, or the key hints; once saving has
+      //      been decided, a switch to change that decision.
+      Item {
         id: footer
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         height: Style.space(18)
-        verticalAlignment: Text.AlignVCenter
-        textFormat: Text.PlainText
-        elide: Text.ElideRight
-        text: root.hostWidget && root.hostWidget.statusText !== ""
-          ? root.hostWidget.statusText
-          : "↑↓ move   ←→ switch list   Enter apply   Esc close"
-        color: root.hostWidget && root.hostWidget.statusIsError ? Color.urgent : root.dim
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.caption
+
+        Text {
+          anchors.left: parent.left
+          anchors.right: saveToggle.visible ? saveToggle.left : parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          text: root.hostWidget && root.hostWidget.statusText !== ""
+            ? root.hostWidget.statusText
+            : "↑↓ move   ←→ switch list   Enter apply   Esc close"
+          color: root.hostWidget && root.hostWidget.statusIsError ? Color.urgent : root.dim
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        Text {
+          id: saveToggle
+          visible: root.saveChoice !== null
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          textFormat: Text.PlainText
+          text: "Remember in input.lua: " + (root.saveChoice === true ? "on" : "off")
+          color: saveToggleMouse.containsMouse ? root.contentForeground : root.dim
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+
+          MouseArea {
+            id: saveToggleMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.hostWidget.setSaveChoice(root.saveChoice !== true)
+          }
+        }
       }
 
       // ---- The two lists.
@@ -390,6 +426,72 @@ Panel {
                   root.applyRow(index)
                 }
               }
+            }
+          }
+        }
+      }
+
+      // ---- Asked once, before anything is written to disk.
+      Rectangle {
+        id: savePrompt
+        visible: root.asking
+        anchors.fill: lists
+        color: Color.popups.background
+        radius: Style.cornerRadius
+
+        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
+
+        Column {
+          anchors.centerIn: parent
+          width: Math.min(parent.width - Style.space(40), Style.space(480))
+          spacing: Style.space(14)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: "Remember this layout?"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            text: "To keep your layout after a restart, Keymap Picker adds a small block at the end of ~/.config/hypr/input.lua. A backup is saved first and the rest of the file is left alone.\n\nOr apply it for this session only and nothing is written."
+            color: root.dim
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            lineHeight: 1.15
+          }
+
+          Row {
+            spacing: Style.space(10)
+
+            Button {
+              text: "Save and apply  ⏎"
+              bordered: true
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.hostWidget.confirmSave(true)
+            }
+
+            Button {
+              text: "This session only  S"
+              bordered: true
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.hostWidget.confirmSave(false)
+            }
+
+            Button {
+              text: "Cancel  Esc"
+              bordered: true
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.hostWidget.cancelSave()
             }
           }
         }

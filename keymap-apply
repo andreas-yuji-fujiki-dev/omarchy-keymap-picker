@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Apply a keyboard layout to Hyprland now, and remember it across restarts.
 #
-#   keymap-apply <layout> [variant]     e.g.  keymap-apply br nodeadkeys
-#   keymap-apply --forget               remove the saved block from input.lua
+#   keymap-apply <layout> [variant]            apply now and remember it
+#   keymap-apply --no-save <layout> [variant]  apply now, write nothing to disk
+#   keymap-apply --forget                      remove the saved block from input.lua
 #
 # Keeps one marked block at the end of ~/.config/hypr/input.lua so the choice
 # survives a reload or reboot, then applies it live through `hyprctl eval`.
@@ -10,7 +11,11 @@
 set -euo pipefail
 
 forget=""
-[[ ${1:-} == --forget ]] && forget=1
+nosave=""
+case "${1:-}" in
+  --forget) forget=1 ;;
+  --no-save) nosave=1; shift ;;
+esac
 
 layout="${1:-}"
 variant="${2:-}"
@@ -23,8 +28,8 @@ if [[ -z $forget && ( -z $layout || ! $layout =~ $valid || ! $variant =~ $valid 
 fi
 
 input_lua="${KEYMAP_INPUT_LUA:-$HOME/.config/hypr/input.lua}"
-begin='-- >>> andreas.keymap (managed by the Keymap plugin, edits here are overwritten) >>>'
-end='-- <<< andreas.keymap <<<'
+begin='-- >>> io.github.andreas.keymap (managed by the Keymap plugin, edits here are overwritten) >>>'
+end='-- <<< io.github.andreas.keymap <<<'
 lua="hl.config({ input = { kb_layout = \"$layout\", kb_variant = \"$variant\" } })"
 
 if [[ -n $forget ]]; then
@@ -39,6 +44,12 @@ if [[ -n $forget ]]; then
   sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp"
   chmod --reference="$input_lua" "$tmp"
   mv "$tmp" "$input_lua"
+  exit 0
+fi
+
+# Session only: change the running keyboard and leave every file alone.
+if [[ -n $nosave ]]; then
+  [[ -n ${KEYMAP_SKIP_LIVE:-} ]] || hyprctl eval "$lua" >/dev/null
   exit 0
 fi
 

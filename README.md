@@ -12,7 +12,8 @@ immediately and is remembered across restarts.
 - Country / language list on the left, the variants of the highlighted one on the right
 - Search across country, language and variant names, so "dvorak" finds every country that has one
 - The same list GNOME offers: it is read from xkeyboard-config (~100 layouts, ~500 variants)
-- Applies instantly, no logout; the selection is saved and restored on the next login
+- Applies instantly, no logout
+- Asks before it writes anything to disk, then remembers your layout across restarts (or applies it for the session only)
 - Full keyboard navigation: `↑` `↓` to move, `←` `→` to switch list, `Enter` to apply, `Esc` to close
 - Theme-aware, built on the Omarchy shell UI components
 
@@ -32,7 +33,7 @@ before cloning and the code is small enough to read first (`Model.js`,
 If the badge does not appear in the bar, move it there:
 
 ```bash
-omarchy bar move andreas.keymap --section right
+omarchy bar move io.github.andreas.keymap --section right
 ```
 
 ## Usage
@@ -41,18 +42,32 @@ Click the badge, pick a country, then pick a variant. A country with no variants
 is applied as soon as you click it. Browsing the list never changes your layout;
 only choosing a variant does.
 
-The shell IPC target `andreas.keymap` exposes the same actions, so you can bind
+The first time you choose a layout, the picker asks whether it may save it (see
+below). `Enter` saves and applies, `S` applies for this session only, `Esc` cancels.
+
+The shell IPC target `io.github.andreas.keymap` exposes the same actions, so you can bind
 keys or script it:
 
 ```bash
-omarchy-shell andreas.keymap toggle            # open or close the picker
-omarchy-shell andreas.keymap set br nodeadkeys # apply a layout and variant directly
-omarchy-shell andreas.keymap set us ""         # layout with no variant
+omarchy-shell io.github.andreas.keymap toggle            # open or close the picker
+omarchy-shell io.github.andreas.keymap set br nodeadkeys # apply a layout and variant directly
+omarchy-shell io.github.andreas.keymap set us ""         # layout with no variant
 ```
+
+`set` never shows the prompt and never writes a file on its own: it saves to
+`input.lua` only if you already allowed saving from the picker, and otherwise
+changes the running session only.
 
 ## What it changes on your system
 
-Only when you pick a layout, the plugin does two things:
+**Nothing is written until you say so.** The first time you choose a layout, the
+picker asks:
+
+- **Save and apply** applies the layout and remembers it, now and for every later pick
+- **This session only** applies it without writing anything (it asks again next time)
+- **Cancel** does nothing
+
+When saving is allowed, the plugin does two things for each layout you pick:
 
 1. Applies it live with `hyprctl eval` (`kb_layout` and `kb_variant`).
 2. Writes it to **`~/.config/hypr/input.lua`** so Hyprland keeps it after a reload
@@ -60,22 +75,25 @@ Only when you pick a layout, the plugin does two things:
    rewrites that block:
 
    ```lua
-   -- >>> andreas.keymap (managed by the Keymap plugin, edits here are overwritten) >>>
+   -- >>> io.github.andreas.keymap (managed by the Keymap plugin, edits here are overwritten) >>>
    hl.config({ input = { kb_layout = "br", kb_variant = "nodeadkeys" } })
-   -- <<< andreas.keymap <<<
+   -- <<< io.github.andreas.keymap <<<
    ```
 
    The first time, a backup is saved next to it as `input.lua.bak.keymap`.
    Because the block comes last, it wins over any `kb_layout` you set earlier in
    that file. Other keyboard settings such as `kb_options` are left alone.
 
-Nothing is written until you choose a layout.
+Your answer is kept as `"saveToConfig": true` (or `false`) on the plugin's entry in
+`~/.config/omarchy/shell.json`. Once you have answered, a **Remember in input.lua:
+on/off** switch at the bottom of the picker changes it. A layout applied for the
+session only is lost if Hyprland reloads its configuration.
 
 ## Remove
 
 ```bash
-~/.config/omarchy/plugins/andreas.keymap/keymap-apply --forget   # drop the saved block from input.lua
-omarchy plugin remove andreas.keymap
+~/.config/omarchy/plugins/io.github.andreas.keymap/keymap-apply --forget   # drop the saved block from input.lua
+omarchy plugin remove io.github.andreas.keymap
 ```
 
 Run the first command before removing the plugin. Without it, your last choice

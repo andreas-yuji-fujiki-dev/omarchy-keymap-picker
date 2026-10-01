@@ -13,7 +13,7 @@ import "Model.js" as Model
 // the list is the same one GNOME offers.
 BarWidget {
   id: root
-  moduleName: "andreas.keymap"
+  moduleName: "io.github.andreas.keymap"
 
   property var layouts: []
   property string currentLayout: ""
@@ -21,6 +21,14 @@ BarWidget {
   property string statusText: ""
   property bool statusIsError: false
   property bool applying: false
+
+  // Writing to ~/.config/hypr/input.lua needs the user's say-so. The choice is
+  // kept in this widget's shell.json entry: true saves layouts to input.lua,
+  // false only changes the running session, and unset means "ask first".
+  readonly property var saveChoice: setting("saveToConfig", null)
+  property bool askingToSave: false
+  property string askLayout: ""
+  property string askVariant: ""
 
   readonly property string applyPath: Qt.resolvedUrl("keymap-apply").toString().replace(/^file:\/\//, "")
   readonly property string badge: currentLayout === "" ? "··" : Model.badgeText(currentLayout)
@@ -32,16 +40,59 @@ BarWidget {
 
   // Layout and variant are checked here as well as in keymap-apply, so a bad
   // name never reaches a process.
-  function applyLayout(layout, variant) {
+  function validPair(layout, variant) {
     var name = String(layout || "")
+    return name !== "" && Model.isValidName(name) && Model.isValidName(String(variant || ""))
+  }
+
+  function applyLayout(layout, variant, save) {
+    if (applying || !validPair(layout, variant)) return
+    var name = String(layout)
     var flavor = String(variant || "")
-    if (applying || name === "" || !Model.isValidName(name) || !Model.isValidName(flavor)) return
     applying = true
     statusText = ""
     applyProcess.pendingLayout = name
     applyProcess.pendingVariant = flavor
-    applyProcess.command = [applyPath, name, flavor]
+    applyProcess.pendingSave = save === true
+    applyProcess.command = save === true ? [applyPath, name, flavor] : [applyPath, "--no-save", name, flavor]
     applyProcess.running = true
+  }
+
+  // What a click in the panel calls. Until the user has decided whether
+  // layouts may be saved to input.lua it stops and asks instead of applying.
+  function requestApply(layout, variant) {
+    if (applying || !validPair(layout, variant)) return
+    if (saveChoice === null) {
+      askLayout = String(layout)
+      askVariant = String(variant || "")
+      askingToSave = true
+      return
+    }
+    applyLayout(layout, variant, saveChoice === true)
+  }
+
+  // remember: true saves this and every later pick; false changes only the
+  // running session and asks again next time.
+  function confirmSave(remember) {
+    var layout = askLayout
+    var variant = askVariant
+    askingToSave = false
+    if (remember) persistSettings({ saveToConfig: true })
+    applyLayout(layout, variant, remember)
+  }
+
+  function cancelSave() { askingToSave = false }
+
+  function setSaveChoice(value) { persistSettings({ saveToConfig: value === true }) }
+
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) entry[key] = values[key]
+
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
   // ---- Popup host. Shape contract for shell.summon/hide/toggle routing:
@@ -54,6 +105,7 @@ BarWidget {
   }
 
   function close() {
+    askingToSave = false
     if (panelLoader.item) panelLoader.item.close()
   }
 
@@ -115,6 +167,7 @@ BarWidget {
     id: applyProcess
     property string pendingLayout: ""
     property string pendingVariant: ""
+    property bool pendingSave: false
 
     stderr: StdioCollector { id: applyErrors }
 
@@ -123,6 +176,7 @@ BarWidget {
       if (exitCode === 0) {
         root.statusIsError = false
         root.statusText = "Applied " + Model.describe(root.layouts, pendingLayout, pendingVariant)
+          + (pendingSave ? "" : " (this session only)")
         root.broadcast("refreshCurrent")
       } else {
         root.statusIsError = true
@@ -143,7 +197,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "andreas.keymap"
+    target: "io.github.andreas.keymap"
 
     function open(): void { root.open() }
     function close(): void { root.close() }
@@ -151,7 +205,8 @@ BarWidget {
     function hide(): void { root.close() }
     function toggle(): void { root.togglePanel() }
     function refresh(): void { root.broadcast("refreshCurrent") }
-    function set(layout: string, variant: string): void { root.applyLayout(layout, variant) }
+    // Scripts never trigger the prompt: they save only if saving was already allowed.
+    function set(layout: string, variant: string): void { root.applyLayout(layout, variant, root.saveChoice === true) }
   }
 
   WidgetButton {
