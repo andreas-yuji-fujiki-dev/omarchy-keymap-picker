@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "andreas.keymap",
+  "name": "Keymap Picker",
+  "version": "0.1.0",
+  "author": "Andreas Yuji Fujiki",
+  "license": "MIT",
+  "description": "Pick your keyboard layout from a country and variant list, like GNOME's input sources. Applies instantly and is remembered.",
+  "homepage": "https://github.com/andreas-yuji-fujiki-dev/omarchy-keymap-picker",
+  "repository": "https://github.com/andreas-yuji-fujiki-dev/omarchy-keymap-picker",
+  "keywords": [
+    "keyboard",
+    "layout",
+    "keymap",
+    "xkb",
+    "input",
+    "hyprland"
+  ],
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Keymap Picker",
+    "description": "Show the keyboard layout and pick another from a country list",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "aliases": [
+      "keyboard",
+      "layout",
+      "keymap",
+      "teclado",
+      "xkb"
+    ]
+  }
+}

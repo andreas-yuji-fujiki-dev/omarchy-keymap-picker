@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Apply a keyboard layout to Hyprland now, and remember it across restarts.
+#
+#   keymap-apply <layout> [variant]     e.g.  keymap-apply br nodeadkeys
+#   keymap-apply --forget               remove the saved block from input.lua
+#
+# Keeps one marked block at the end of ~/.config/hypr/input.lua so the choice
+# survives a reload or reboot, then applies it live through `hyprctl eval`.
+# Only that block is ever rewritten; the rest of the file is left alone.
+set -euo pipefail
+
+forget=""
+[[ ${1:-} == --forget ]] && forget=1
+
+layout="${1:-}"
+variant="${2:-}"
+
+# Names go straight into a Lua string, so only xkb-style names are accepted.
+valid='^[A-Za-z0-9_+.-]*$'
+if [[ -z $forget && ( -z $layout || ! $layout =~ $valid || ! $variant =~ $valid ) ]]; then
+  echo "keymap-apply: invalid layout or variant" >&2
+  exit 2
+fi
+
+input_lua="${KEYMAP_INPUT_LUA:-$HOME/.config/hypr/input.lua}"
+begin='-- >>> andreas.keymap (managed by the Keymap plugin, edits here are overwritten) >>>'
+end='-- <<< andreas.keymap <<<'
+lua="hl.config({ input = { kb_layout = \"$layout\", kb_variant = \"$variant\" } })"
+
+if [[ -n $forget ]]; then
+  [[ -e $input_lua ]] || exit 0
+  tmp="$(mktemp "$input_lua.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  awk -v begin="$begin" -v end="$end" '
+    $0 == begin { skip = 1; next }
+    $0 == end   { skip = 0; next }
+    !skip       { print }
+  ' "$input_lua" > "$tmp"
+  sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp"
+  chmod --reference="$input_lua" "$tmp"
+  mv "$tmp" "$input_lua"
+  exit 0
+fi
+
+mkdir -p "$(dirname "$input_lua")"
+[[ -e $input_lua ]] || : > "$input_lua"
+
+# One backup, the first time the plugin touches the file.
+if ! grep -qF -- "$begin" "$input_lua" && [[ ! -e $input_lua.bak.keymap ]]; then
+  cp -p "$input_lua" "$input_lua.bak.keymap"
+fi
+
+tmp="$(mktemp "$input_lua.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+
+# Drop any previous block, then append the current one.
+awk -v begin="$begin" -v end="$end" '
+  $0 == begin { skip = 1; next }
+  $0 == end   { skip = 0; next }
+  !skip       { print }
+' "$input_lua" > "$tmp"
+
+# Trim trailing blank lines so repeated applies don't grow the file.
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp"
+
+{
+  cat "$tmp"
+  printf '\n%s\n%s\n%s\n' "$begin" "$lua" "$end"
+} > "$tmp.new"
+
+chmod --reference="$input_lua" "$tmp.new"
+mv "$tmp.new" "$input_lua"
+
+# Live apply goes last. Hyprland reloads its config when files in its directory
+# change, and a reload that lands mid-write would put the old layout back; once
+# the file is final, any reload and this call agree.
+if [[ -z ${KEYMAP_SKIP_LIVE:-} ]]; then
+  sleep 0.4
+  hyprctl eval "$lua" >/dev/null
+fi
